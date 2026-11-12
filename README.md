@@ -1,37 +1,65 @@
 # UFV SecureBank
 
-Multi-process banking system in C for Linux, built for the *Operating Systems* course in Computer Engineering at Universidad Francisco de Vitoria (2026).
+Sistema bancario multiproceso en C para Linux, desarrollado para la asignatura de *Sistemas Operativos* del Grado en Ingeniería Informática de la Universidad Francisco de Vitoria (2026).
 
-Clients connect over TCP and each session runs in its own process. The processes share account data safely and report activity to a monitor that detects suspicious behaviour and can block accounts in real time.
+Los clientes se conectan por TCP y cada sesión se ejecuta en su propio proceso. Los procesos comparten los datos de las cuentas de forma segura y envían su actividad a un monitor que detecta comportamientos sospechosos y puede bloquear cuentas en tiempo real.
 
-**Stack:** C · POSIX (processes, pipes, message queues, named semaphores, threads, signals, sockets) · Linux
+**Tecnologías:** C · POSIX (procesos, pipes, colas de mensajes, semáforos con nombre, hilos, señales, sockets) · Linux
 
-## Features
+## Funcionalidades
 
-- **Accounts in three currencies** (EUR, USD, GBP): deposit, withdraw, transfer between accounts and convert between currencies.
-- **Configurable limits** per currency for withdrawals and transfers, and exchange rates, read from `config.txt`.
-- **Fraud detection**: a monitor process flags excessive withdrawals and repeated transfers and the bank blocks the affected account.
-- **Transaction log** written to `transacciones.log`.
-- **Remote access**: clients connect over TCP (port set in `config.txt`), log in with an account number or create a new account.
+- **Cuentas en tres divisas** (EUR, USD, GBP): ingresos, retiradas, transferencias entre cuentas y cambio de divisa.
+- **Límites configurables** por divisa para retiradas y transferencias, y tipos de cambio, leídos desde `config.txt`.
+- **Detección de fraude**: un proceso monitor detecta retiradas excesivas y transferencias repetitivas, y el banco bloquea la cuenta afectada.
+- **Registro de transacciones** en `transacciones.log`.
+- **Acceso remoto**: los clientes se conectan por TCP (puerto definido en `config.txt`) e inician sesión con su número de cuenta o crean una nueva.
 
-## Architecture
+## Arquitectura
 
 ```
-            TCP clients
+            Clientes TCP
                  │
         ┌────────▼────────┐  fork + exec   ┌──────────────┐
-        │   banco (main)  │───────────────▶│   monitor    │
-        │  accepts conns, │◀── alerts ─────│  detects     │
-        │  writes the log │   (mq)         │  anomalies   │
+        │ banco (principal)│──────────────▶│   monitor    │
+        │ acepta conexiones│◀── alertas ───│  detecta     │
+        │ escribe el log   │   (cola)      │  anomalías   │
         └──┬──────────▲───┘                └──────▲───────┘
-  fork+exec│          │ log entries (mq)          │ operations (mq)
-  per client          │                           │
+  fork+exec│          │ entradas de log (cola)    │ operaciones (cola)
+  por cliente         │                           │
         ┌──▼──────────┴───────────────────────────┴──┐
-        │   usuario (one process per session)        │
-        │   stdin/stdout redirected to the socket    │
+        │   usuario (un proceso por sesión)          │
+        │   stdin/stdout redirigidos al socket       │
         └────────────────────────────────────────────┘
 ```
 
-- **Processes:** `banco` forks the `monitor` and one `usuario` process per client (`fork` + `execv`), and reaps them with `waitpid`.
-- **IPC:** three POSIX message queues (operations → monitor, log → bank, alerts → bank), plus a pipe per child to push account blocks.
-- **Synchronization:** named POSIX semaphores guard the
+- **Procesos:** `banco` crea el `monitor` y un proceso `usuario` por cliente (`fork` + `execv`), y los recoge con `waitpid`.
+- **Comunicación entre procesos:** tres colas de mensajes POSIX (operaciones → monitor, log → banco, alertas → banco) y un pipe por hijo para enviar bloqueos de cuenta.
+- **Sincronización:** semáforos POSIX con nombre protegen el fichero de cuentas y la configuración.
+- **Sockets:** la entrada y salida de cada sesión se redirige a su socket con `dup2`.
+- **Señales:** `SIGINT`/`SIGTERM` provocan un cierre limpio que detiene los hijos y elimina las colas y semáforos.
+
+## Compilar y ejecutar
+
+```bash
+gcc -o banco   banco.c   -lrt -pthread
+gcc -o usuario usuario.c -lrt -pthread
+gcc -o monitor monitor.c -lrt -pthread
+
+./banco
+```
+
+Desde otra terminal, conéctate como cliente:
+
+```bash
+nc localhost 8080
+```
+
+## Ficheros
+
+| Fichero | Función |
+|---|---|
+| `banco.c` | Proceso principal: servidor, gestión de procesos, log y alertas |
+| `usuario.c` | Sesión del cliente: operaciones sobre la cuenta |
+| `monitor.c` | Detección de anomalías |
+| `banco_comun.h` | Constantes, estructuras y nombres de colas y semáforos compartidos |
+| `config.txt` | Límites, umbrales, tipos de cambio y puerto |
